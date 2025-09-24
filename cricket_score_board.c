@@ -1,200 +1,284 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 
 #define MAX_PLAYERS 11
+#define NAME_LEN 64
 
-struct batsman {
-    char name[25];
-    int runs, balls, ones, twos, threes, fours, sixes, is_out;
-    float strike_rate;
-} batsmen[MAX_PLAYERS];
+typedef struct {
+    char name[NAME_LEN];
+    int runs;
+    int balls;
+    int ones, twos, threes, fours, sixes;
+    int is_out;
+    double strike_rate;
+} Batsman;
 
-struct bowler {
-    char name[25];
-    int runs_given, wickets_taken, balls_bowled, extras;
-    float economy;
-} bowlers[MAX_PLAYERS];
+typedef struct {
+    char name[NAME_LEN];
+    int runs_given;
+    int wickets_taken;
+    int balls_bowled; /* total balls (overs*6 + extra balls) */
+    int extras;
+    double economy;
+} Bowler;
 
-int total_extras = 0;
-int total_wickets = 0;
-int total_runs = 0;
-int max_overs;
-int num_batsmen, num_bowlers, max_wickets;
+typedef struct {
+    Batsman batsmen[MAX_PLAYERS];
+    Bowler bowlers[MAX_PLAYERS];
+    int num_batsmen;
+    int num_bowlers;
+    int total_runs;   /* sum of batsmen runs */
+    int total_extras; /* sum of bowler extras */
+    int total_wickets;
+} Innings;
 
-void inputMatchDetails() {
-    printf("Enter the number of batsmen: ");
-    scanf("%d", &num_batsmen);
-    max_wickets = num_batsmen - 1;
-    
-    printf("Enter the number of bowlers: ");
-    scanf("%d", &num_bowlers);
-    
-    printf("Enter the number of overs for the match: ");
-    scanf("%d", &max_overs);
+/* ---------- Helper Input Utilities ---------- */
+
+static void readLine(char *buf, size_t n) {
+    if (!fgets(buf, (int)n, stdin)) {
+        buf[0] = '\0';
+        return;
+    }
+    size_t len = strlen(buf);
+    if (len && buf[len - 1] == '\n') buf[len - 1] = '\0';
 }
 
-void inputBatsmanData(int innings, int max_balls) {
-    int balls_remaining = max_balls;
-    printf("\nInnings %d - Batsmen Details (Max balls: %d)\n", innings, max_balls);
-    
-    for (int i = 0; i < num_batsmen; i++) {
-        printf("Enter name of batsman %d: ", i + 1);
-        scanf("%s", batsmen[i].name);
-
-        printf("Enter the number of ones, twos, threes, fours, sixes scored by %s: ", batsmen[i].name);
-        scanf("%d %d %d %d %d", &batsmen[i].ones, &batsmen[i].twos, &batsmen[i].threes, 
-              &batsmen[i].fours, &batsmen[i].sixes);
-
-        printf("Enter balls played by %s (Max remaining: %d): ", batsmen[i].name, balls_remaining);
-        scanf("%d", &batsmen[i].balls);
-        
-        while (batsmen[i].balls > balls_remaining || batsmen[i].balls < 0) {
-            printf("Invalid input! Balls must be between 0 and %d: ", balls_remaining);
-            scanf("%d", &batsmen[i].balls);
+/* read integer with prompt; enforce min..max if max >= min */
+static int readIntRange(const char *prompt, int min, int max) {
+    char line[128];
+    int val;
+    while (1) {
+        printf("%s", prompt);
+        readLine(line, sizeof(line));
+        if (sscanf(line, "%d", &val) != 1) {
+            printf("Invalid integer. Try again.\n");
+            continue;
         }
-        balls_remaining -= batsmen[i].balls;
-
-        printf("Did %s get out? (1 for Yes, 0 for No): ", batsmen[i].name);
-        scanf("%d", &batsmen[i].is_out);
-    }
-    
-    if (balls_remaining > 0) {
-        printf("Warning: %d balls remaining unplayed!\n", balls_remaining);
+        if (max >= min && (val < min || val > max)) {
+            if (min == max)
+                printf("Value must be %d. Try again.\n", min);
+            else
+                printf("Value must be between %d and %d. Try again.\n", min, max);
+            continue;
+        }
+        return val;
     }
 }
 
-void inputBowlerData(int innings, int batsman_runs) {
+/* ---------- Core Functions ---------- */
+
+static void inputMatchDetails(int *num_batsmen, int *num_bowlers, int *max_overs) {
+    *num_batsmen = readIntRange("Enter the number of batsmen (1-11): ", 1, MAX_PLAYERS);
+    *num_bowlers = readIntRange("Enter the number of bowlers (1-11): ", 1, MAX_PLAYERS);
+    *max_overs   = readIntRange("Enter the number of overs for the match (>=1): ", 1, 100);
+}
+
+static void inputBatsmanData(Innings *inn, int max_balls, int innings_no) {
+    int balls_remaining = max_balls;
+    printf("\nInnings %d - Batsmen Details (Total balls available: %d)\n", innings_no, max_balls);
+
+    for (int i = 0; i < inn->num_batsmen; ++i) {
+        printf("\nBatsman %d name: ", i + 1);
+        readLine(inn->batsmen[i].name, NAME_LEN);
+        if (inn->batsmen[i].name[0] == '\0') snprintf(inn->batsmen[i].name, NAME_LEN, "Batsman%d", i+1);
+
+        inn->batsmen[i].ones = readIntRange("  Ones: ", 0, 1000000);
+        inn->batsmen[i].twos = readIntRange("  Twos: ", 0, 1000000);
+        inn->batsmen[i].threes = readIntRange("  Threes: ", 0, 1000000);
+        inn->batsmen[i].fours = readIntRange("  Fours: ", 0, 1000000);
+        inn->batsmen[i].sixes = readIntRange("  Sixes: ", 0, 1000000);
+
+        char prompt[128];
+        snprintf(prompt, sizeof(prompt), "  Balls faced by %s (0 to %d): ", inn->batsmen[i].name, balls_remaining);
+        inn->batsmen[i].balls = readIntRange(prompt, 0, balls_remaining);
+        balls_remaining -= inn->batsmen[i].balls;
+
+        inn->batsmen[i].is_out = readIntRange("  Is out? (1 for Yes, 0 for No): ", 0, 1);
+    }
+
+    if (balls_remaining > 0) {
+        printf("Warning: %d balls remaining unplayed in this innings.\n", balls_remaining);
+    }
+}
+
+/* Read overs and balls as two integers and convert to total balls bowled for a bowler */
+static int readOversToBalls(const char *bowler_name, int max_balls_remaining) {
+    while (1) {
+        int overs = readIntRange("  Overs bowled (integer part): ", 0, max_balls_remaining / 6);
+        int extra_balls = readIntRange("  Extra balls this over (0-5): ", 0, 5);
+        int tot = overs * 6 + extra_balls;
+        if (tot <= max_balls_remaining) return tot;
+        printf("  That exceeds remaining balls (%d). Try again.\n", max_balls_remaining);
+    }
+}
+
+static void inputBowlerData(Innings *inn, int max_overs, int innings_no) {
     int total_balls = max_overs * 6;
     int balls_remaining = total_balls;
-    int runs_remaining = batsman_runs;
-    total_extras = 0;
-    
-    printf("\nInnings %d - Bowlers Details\n", innings);
-    printf("Total runs to be distributed among bowlers (excluding extras): %d\n", batsman_runs);
-    
-    for (int i = 0; i < num_bowlers; i++) {
-        printf("Enter name of bowler %d: ", i + 1);
-        scanf("%s", bowlers[i].name);
+    int runs_remaining = inn->total_runs; /* runs to be distributed among bowlers (excluding extras) */
+    inn->total_extras = 0;
 
-        printf("Enter overs bowled by %s (Max remaining: %d overs, %d balls): ", 
-               bowlers[i].name, balls_remaining/6, balls_remaining);
-        int overs;
-        scanf("%d", &overs);
-        bowlers[i].balls_bowled = overs * 6;
-        
-        while (bowlers[i].balls_bowled > balls_remaining || bowlers[i].balls_bowled < 0) {
-            printf("Invalid input! Overs must be between 0 and %d: ", balls_remaining/6);
-            scanf("%d", &overs);
-            bowlers[i].balls_bowled = overs * 6;
-        }
-        balls_remaining -= bowlers[i].balls_bowled;
-        
-        if (i == num_bowlers - 1) {
-            bowlers[i].runs_given = runs_remaining;
-            printf("Enter wickets taken and extras by %s (Runs given set to %d): ", 
-                   bowlers[i].name, bowlers[i].runs_given);
-            scanf("%d %d", &bowlers[i].wickets_taken, &bowlers[i].extras);
+    printf("\nInnings %d - Bowlers Details\n", innings_no);
+    printf("Total batsmen runs (excluding extras) to distribute to bowlers: %d\n", inn->total_runs);
+
+    for (int i = 0; i < inn->num_bowlers; ++i) {
+        printf("\nBowler %d name: ", i + 1);
+        readLine(inn->bowlers[i].name, NAME_LEN);
+        if (inn->bowlers[i].name[0] == '\0') snprintf(inn->bowlers[i].name, NAME_LEN, "Bowler%d", i+1);
+
+        printf("Enter overs and balls for %s (remaining balls: %d)\n", inn->bowlers[i].name, balls_remaining);
+        inn->bowlers[i].balls_bowled = readOversToBalls(inn->bowlers[i].name, balls_remaining);
+        balls_remaining -= inn->bowlers[i].balls_bowled;
+
+        if (i == inn->num_bowlers - 1) {
+            /* Last bowler takes remaining runs */
+            inn->bowlers[i].runs_given = runs_remaining;
+            char prompt[128];
+            snprintf(prompt, sizeof(prompt), "  Wickets taken by %s: ", inn->bowlers[i].name);
+            inn->bowlers[i].wickets_taken = readIntRange(prompt, 0, inn->num_batsmen);
+            snprintf(prompt, sizeof(prompt), "  Extras conceded by %s: ", inn->bowlers[i].name);
+            inn->bowlers[i].extras = readIntRange(prompt, 0, 1000000);
         } else {
-            printf("Enter runs given (Max remaining: %d), wickets taken, extras by %s: ", 
-                   runs_remaining, bowlers[i].name);
-            scanf("%d %d %d", &bowlers[i].runs_given, &bowlers[i].wickets_taken, &bowlers[i].extras);
-            
-            while (bowlers[i].runs_given > runs_remaining || bowlers[i].runs_given < 0) {
-                printf("Invalid input! Runs must be between 0 and %d: ", runs_remaining);
-                scanf("%d", &bowlers[i].runs_given);
-            }
-            runs_remaining -= bowlers[i].runs_given;
+            char prompt[128];
+            snprintf(prompt, sizeof(prompt), "  Runs given by %s (0 to %d): ", inn->bowlers[i].name, runs_remaining);
+            inn->bowlers[i].runs_given = readIntRange(prompt, 0, runs_remaining);
+            snprintf(prompt, sizeof(prompt), "  Wickets taken by %s: ", inn->bowlers[i].name);
+            inn->bowlers[i].wickets_taken = readIntRange(prompt, 0, inn->num_batsmen);
+            snprintf(prompt, sizeof(prompt), "  Extras conceded by %s: ", inn->bowlers[i].name);
+            inn->bowlers[i].extras = readIntRange(prompt, 0, 1000000);
+
+            runs_remaining -= inn->bowlers[i].runs_given;
         }
-        total_extras += bowlers[i].extras;
+
+        inn->total_extras += inn->bowlers[i].extras;
     }
-    
+
     if (balls_remaining > 0) {
-        printf("Warning: %d balls (%d overs) remaining unbowled!\n", balls_remaining, balls_remaining/6);
+        int rem_overs = balls_remaining / 6;
+        int rem_balls = balls_remaining % 6;
+        printf("Warning: %d balls (%d overs and %d balls) remaining unbowled!\n", balls_remaining, rem_overs, rem_balls);
     }
-    if (runs_remaining > 0 && num_bowlers > 0) {
+    if (runs_remaining > 0 && inn->num_bowlers > 0) {
         printf("Warning: %d runs were not distributed among bowlers!\n", runs_remaining);
     }
 }
 
-void calculateStats() {
-    total_runs = 0;
-    total_wickets = 0;
-    
-    for (int i = 0; i < num_batsmen; i++) {
-        batsmen[i].runs = (batsmen[i].ones * 1) + (batsmen[i].twos * 2) + (batsmen[i].threes * 3) +
-                         (batsmen[i].fours * 4) + (batsmen[i].sixes * 6);
-        batsmen[i].strike_rate = batsmen[i].balls > 0 ? (batsmen[i].runs * 100.0) / batsmen[i].balls : 0;
-        total_runs += batsmen[i].runs;
-        if (batsmen[i].is_out) total_wickets++;
+/* compute totals, strike rates and economies */
+static void calculateStats(Innings *inn) {
+    inn->total_runs = 0;
+    inn->total_wickets = 0;
+
+    for (int i = 0; i < inn->num_batsmen; ++i) {
+        Batsman *b = &inn->batsmen[i];
+        b->runs = b->ones + (b->twos * 2) + (b->threes * 3) + (b->fours * 4) + (b->sixes * 6);
+        b->strike_rate = (b->balls > 0) ? ((double)b->runs * 100.0 / (double)b->balls) : 0.0;
+        inn->total_runs += b->runs;
+        if (b->is_out) inn->total_wickets++;
     }
-    
-    for (int i = 0; i < num_bowlers; i++) {
-        bowlers[i].economy = bowlers[i].balls_bowled > 0 ? 
-                            (float)(bowlers[i].runs_given + bowlers[i].extras) / (bowlers[i].balls_bowled / 6.0) : 0;
+
+    for (int i = 0; i < inn->num_bowlers; ++i) {
+        Bowler *bw = &inn->bowlers[i];
+        if (bw->balls_bowled > 0) {
+            double overs = (double)bw->balls_bowled / 6.0;
+            bw->economy = ((double)bw->runs_given + (double)bw->extras) / overs;
+        } else {
+            bw->economy = 0.0;
+        }
     }
 }
 
-void displayMatchSummary(int target, int innings) {
-    printf("\n======== INNINGS %d SUMMARY ========\n", innings);
-    
+/* display overs in O.B format (e.g., 4.2 means 4 overs and 2 balls) */
+static void printOversFromBalls(int balls) {
+    int overs = balls / 6;
+    int rem = balls % 6;
+    printf("%d.%d", overs, rem);
+}
+
+static void displayMatchSummary(const Innings *inn, int max_wickets, int max_overs, int innings_no, int target_for_next) {
+    printf("\n======== INNINGS %d SUMMARY ========\n", innings_no);
+
     printf("\nBatting Scorecard\n");
-    printf("Batsman\tRuns\tBalls\tFours\tSixes\tSR\tOut\n");
-    printf("------------------------------------------------\n");
-    for (int i = 0; i < num_batsmen; i++) {
-        printf("%-10s %-5d %-5d %-5d %-5d %-10.2f %-8s\n", batsmen[i].name, batsmen[i].runs, batsmen[i].balls,
-               batsmen[i].fours, batsmen[i].sixes, batsmen[i].strike_rate, batsmen[i].is_out ? "Yes" : "No");
+    printf("Batsman\t\tRuns\tBalls\tFours\tSixes\tSR\tOut\n");
+    printf("-------------------------------------------------------------\n");
+    for (int i = 0; i < inn->num_batsmen; ++i) {
+        const Batsman *b = &inn->batsmen[i];
+        printf("%-15s %-5d %-5d %-5d %-5d %-7.2f %-4s\n",
+               b->name, b->runs, b->balls, b->fours, b->sixes, b->strike_rate, b->is_out ? "Yes" : "No");
     }
-    
+
     printf("\nBowling Scorecard\n");
-    printf("Bowler\tOvers\tRuns\tWickets\tExtras\tEconomy\n");
-    printf("-----------------------------------------\n");
-    for (int i = 0; i < num_bowlers; i++) {
-        float overs = bowlers[i].balls_bowled / 6.0;
-        printf("%-10s %-5.1f %-5d %-5d %-5d %-5.2f\n", bowlers[i].name, overs, 
-               bowlers[i].runs_given + bowlers[i].extras, bowlers[i].wickets_taken, 
-               bowlers[i].extras, bowlers[i].economy);
+    printf("Bowler\t\tOvers\tRuns\tWickets\tExtras\tEcon\n");
+    printf("-------------------------------------------------\n");
+    for (int i = 0; i < inn->num_bowlers; ++i) {
+        const Bowler *bw = &inn->bowlers[i];
+        printf("%-15s ", bw->name);
+        printOversFromBalls(bw->balls_bowled);
+        printf("\t%-5d %-7d %-6d %-5.2f\n",
+               bw->runs_given + bw->extras, bw->wickets_taken, bw->extras, bw->economy);
     }
-    
-    printf("\nTotal Runs: %d, Wickets: %d/%d, Extras: %d\n", total_runs + total_extras, 
-           total_wickets, max_wickets, total_extras);
-    if (innings == 1) {
-        printf("Target for Second Innings: %d\n", target);
+
+    int total_innings_runs = inn->total_runs + inn->total_extras;
+    printf("\nTotal Runs: %d, Wickets: %d/%d, Extras: %d\n",
+           total_innings_runs, inn->total_wickets, max_wickets, inn->total_extras);
+
+    if (innings_no == 1) {
+        printf("Target for Second Innings: %d\n", target_for_next);
     }
 }
 
-void determineWinner(int runs_team1, int runs_team2) {
+static void determineWinner(int runs_team1, int runs_team2, int second_innings_wickets_taken, int max_wickets) {
     printf("\n======== MATCH RESULT ========\n");
     if (runs_team1 > runs_team2) {
         printf("Team 1 wins by %d runs!\n", runs_team1 - runs_team2);
     } else if (runs_team2 > runs_team1) {
-        printf("Team 2 wins by %d wickets!\n", max_wickets - total_wickets);
+        /* remaining wickets = max_wickets - wickets lost by the chasing team */
+        int wickets_in_hand = max_wickets - second_innings_wickets_taken;
+        if (wickets_in_hand < 0) wickets_in_hand = 0;
+        printf("Team 2 wins by %d wicket%s!\n", wickets_in_hand, (wickets_in_hand == 1) ? "" : "s");
     } else {
         printf("Match is a tie!\n");
     }
 }
 
-int main() {
-    inputMatchDetails();
+/* ---------- Main ---------- */
+
+int main(void) {
+    Innings innings1 = {0}, innings2 = {0};
+    int max_overs = 0;
+
+    inputMatchDetails(&innings1.num_batsmen, &innings1.num_bowlers, &max_overs);
+    if (innings1.num_batsmen > MAX_PLAYERS) innings1.num_batsmen = MAX_PLAYERS;
+    if (innings1.num_bowlers > MAX_PLAYERS) innings1.num_bowlers = MAX_PLAYERS;
+
+    int max_wickets = innings1.num_batsmen - 1;
     int max_balls = max_overs * 6;
-    
-    printf("======== FIRST INNINGS ========\n");
-    inputBatsmanData(1, max_balls);
-    calculateStats();
-    inputBowlerData(1, total_runs);
-    displayMatchSummary(total_runs + total_extras + 1, 1);
-    int first_innings_runs = total_runs + total_extras;
-    
-    total_runs = 0;
-    total_wickets = 0;
-    total_extras = 0;
-    
+
+    /* FIRST INNINGS */
+    printf("\n======== FIRST INNINGS ========\n");
+    inputBatsmanData(&innings1, max_balls, 1);
+    calculateStats(&innings1);
+    inputBowlerData(&innings1, max_overs, 1);
+    calculateStats(&innings1); /* recalc economy after bowlers input */
+    int first_innings_total = innings1.total_runs + innings1.total_extras;
+    displayMatchSummary(&innings1, max_wickets, max_overs, 1, first_innings_total + 1);
+
+    /* SECOND INNINGS - set players counts same as first innings by default */
+    innings2.num_batsmen = innings1.num_batsmen;
+    innings2.num_bowlers = innings1.num_bowlers;
+
     printf("\n======== SECOND INNINGS ========\n");
-    inputBatsmanData(2, max_balls);
-    calculateStats();
-    inputBowlerData(2, total_runs);
-    displayMatchSummary(first_innings_runs + 1, 2);
-    determineWinner(first_innings_runs, total_runs + total_extras);
+    inputBatsmanData(&innings2, max_balls, 2);
+    calculateStats(&innings2);
+    inputBowlerData(&innings2, max_overs, 2);
+    calculateStats(&innings2); /* recalc economy after bowlers input */
+
+    int second_innings_total = innings2.total_runs + innings2.total_extras;
+    displayMatchSummary(&innings2, max_wickets, max_overs, 2, first_innings_total + 1);
+
+    /* Determine winner: note that innings2.total_wickets is wickets lost by team 2 */
+    determineWinner(first_innings_total, second_innings_total, innings2.total_wickets, max_wickets);
 
     return 0;
 }
